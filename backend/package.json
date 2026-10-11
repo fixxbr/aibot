@@ -1,0 +1,35 @@
+{
+  "name": "fixera-core",
+  "version": "0.1.0",
+  "description": "Fixera AI core: property-aware home diagnostics, safe DIY guidance and professional handoff for FixBridge",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/db/migrate.js",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "eval": "node src/evaluations/run.js",
+    "seed:demo": "node scripts/seedDemo.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "express": "^4.22.3",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^1.4.4",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite-pgvector": "^0.0.9",
+    "supertest": "^7.3.1"
+  },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}
