@@ -8,9 +8,12 @@
 import jwt from 'jsonwebtoken';
 import { HttpError } from '../middleware/errors.js';
 
-export function createPlatformAdapter({ db, config }) {
+export function createPlatformAdapter({ db, config, authenticate }) {
   return {
+    // Pass `authenticate` to reuse FixBridge's existing login/session, e.g.
+    //   authenticate: async (req) => req.user && { id: req.user.id, role: req.user.role }
     async authenticate(req) {
+      if (authenticate) return authenticate(req);
       const header = req.headers.authorization || '';
       const token = header.startsWith('Bearer ') ? header.slice(7) : null;
       if (!token || !config.auth.jwtSecret) return null;

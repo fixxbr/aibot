@@ -10,7 +10,8 @@ export function loadConfig(env = process.env) {
     isProduction: nodeEnv === 'production',
     port: int(env.PORT, 4000),
     databaseUrl: env.DATABASE_URL || null, // null => embedded PGlite (dev/test only)
-    pgliteDataDir: env.PGLITE_DATA_DIR || null,
+    pgliteDataDir: env.PGLITE_DATA_DIR || (nodeEnv === 'test' ? null : './data/pglite'),
+    seedDemo: bool(env.FIXERA_SEED_DEMO, false),
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
     auth: {
       // FixBridge issues the JWT; Fixera only verifies it.
@@ -34,7 +35,6 @@ export function loadConfig(env = process.env) {
       order: (env.FIXERA_PROVIDER_ORDER || 'openrouter,anthropic,openai,gemini').split(',').map((s) => s.trim()).filter(Boolean),
       timeoutMs: int(env.FIXERA_PROVIDER_TIMEOUT_MS, 120_000),
       allowTextOnlyFallback: bool(env.FIXERA_ALLOW_TEXT_ONLY_FALLBACK, false),
-      allowMock: bool(env.FIXERA_ALLOW_MOCK_PROVIDER, nodeEnv !== 'production'),
       openrouter: { apiKey: env.OPENROUTER_API_KEY, model: env.OPENROUTER_MODEL, baseUrl: env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1' },
       anthropic: { apiKey: env.ANTHROPIC_API_KEY, baseUrl: env.ANTHROPIC_BASE_URL || undefined, model: env.ANTHROPIC_MODEL || 'claude-opus-5-5', effort: env.ANTHROPIC_EFFORT || 'high', serverFallbacks: bool(env.ANTHROPIC_SERVER_FALLBACKS, true) },
       openai: { apiKey: env.OPENAI_API_KEY, model: env.OPENAI_MODEL, baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1' },

@@ -27,6 +27,7 @@ export async function createDb(config) {
   }
 
   const { PGlite } = await import('@electric-sql/pglite');
+  if (config.pgliteDataDir) (await import('node:fs')).mkdirSync(config.pgliteDataDir, { recursive: true });
   const extensions = {};
   try {
     const { vector } = await import('@electric-sql/pglite-pgvector');

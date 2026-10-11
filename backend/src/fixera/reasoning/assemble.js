@@ -14,6 +14,15 @@ export function groundProposal(output, ctx, { visionUsed }) {
   if (visionUsed) {
     const seen = new Set();
     imageFindings = output.image_findings.filter((f) => labels.has(f.photo) && !seen.has(f.photo) && seen.add(f.photo));
+    // Follow-up turns often don't re-describe earlier photos: keep the previous finding for
+    // any photo not re-assessed this turn instead of treating it as unusable.
+    const previous = ctx.latestAssessment?.result?.image_findings || [];
+    for (const f of previous) {
+      if (labels.has(f.photo) && !seen.has(f.photo)) {
+        imageFindings.push(f);
+        seen.add(f.photo);
+      }
+    }
     const missing = [...labels].filter((l) => !seen.has(l));
     if (missing.length) notes.push(`model_did_not_report_on:${missing.join(',')}`);
   } else if (output.image_findings.length) {
@@ -34,7 +43,9 @@ export function groundProposal(output, ctx, { visionUsed }) {
 
   // Evidence sufficiency. Photos were supplied but none is usable => ask for better ones.
   const usablePhotos = imageFindings.filter((f) => f.quality === 'good' && f.relevant);
-  const photosUnusable = visionUsed && labels.size > 0 && usablePhotos.length === 0;
+  // Only conclude photos are unusable when every photo was actually assessed.
+  const allAssessed = imageFindings.length === labels.size;
+  const photosUnusable = visionUsed && labels.size > 0 && allAssessed && usablePhotos.length === 0;
   let photoRequests = output.photo_requests;
   if (photosUnusable && !photoRequests.length) {
     photoRequests = [{

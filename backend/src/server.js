@@ -8,6 +8,12 @@ import { logger } from './logger.js';
 const config = loadConfig();
 const db = await createDb(config);
 await migrate(db, (m) => logger.info(m));
+if (config.seedDemo) {
+  const { seedDemo } = await import('./dev/seedDemo.js');
+  const tokens = await seedDemo(db, config);
+  logger.info('Demo data seeded. Dev tokens (local only):');
+  for (const [user, token] of Object.entries(tokens)) console.log(`  ${user}: ${token}`);
+}
 const storage = await createStorage(config);
 const fixera = createFixera({ db, config, storage });
 

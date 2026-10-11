@@ -76,6 +76,13 @@ export function createCasesRouter({ db, platform, storage, orchestrator, handoff
 
   r.get('/categories', asyncHandler(async (req, res) => res.json({ categories: await platform.listServiceCategories() })));
 
+  // Fee shown before the homeowner pays for a dispatch. Always from platform pricing.
+  r.get('/dispatch-fee', asyncHandler(async (req, res) => {
+    const category = String(req.query.category || '');
+    if (!(await platform.getServiceCategory(category))) throw badRequest('Unknown service category');
+    res.json({ category, amount_cents: await platform.getDispatchFeeCents(category), currency: 'USD' });
+  }));
+
   r.get('/entitlement', asyncHandler(async (req, res) => res.json(await platform.getAnalysisEntitlement(req.user.id))));
 
   r.get('/cases', asyncHandler(async (req, res) => {

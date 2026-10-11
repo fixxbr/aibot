@@ -90,6 +90,19 @@ test('"I need help with this step" gets a fresh explanation in the same case', a
   assert.equal(view.steps.length, 3, 'plan kept when the turn only explains');
 });
 
+test('a follow-up turn that does not re-describe photos keeps earlier findings and the DIY plan', async () => {
+  script = () => modelOutput({ image_findings: [{ photo: 'photo_1', quality: 'good', quality_issue: null, shows: 'P-trap with drips', relevant: true }] });
+  const c = await createCase(env.api, 'u_alice', { property_id: ids.alice1, category: 'plumbing', description: 'Drip at the trap under the sink' });
+  await uploadPhotos(env.api, 'u_alice', c.id, [png()]);
+  let view = (await env.api.post(`/api/fixera/cases/${c.id}/analyze?wait=true`).set(auth())).body;
+  assert.equal(view.case.status, 'DIY_AVAILABLE');
+  script = () => modelOutput({ reply_to_homeowner: 'The slip nut is the large ring.', image_findings: [] });
+  view = (await env.api.post(`/api/fixera/cases/${c.id}/messages?wait=true`).set(auth()).send({ content: 'Which one is the slip nut?' })).body;
+  assert.equal(view.case.status, 'DIY_AVAILABLE');
+  assert.deepEqual(view.assessment.photo_requests, []);
+  assert.equal(view.assessment.image_findings[0].photo, 'photo_1');
+});
+
 test('DIY fails, homeowner hires a pro, contractor finds something else, and Fixera learns from it', async () => {
   script = () => modelOutput({
     problem_summary: 'Kitchen sink leak',

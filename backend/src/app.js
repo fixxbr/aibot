@@ -31,8 +31,26 @@ export function createFixera({ db, config, storage, providers, platform, embedde
   return { db, config, storage, platform, router, knowledge, pricing, orchestrator, handoff };
 }
 
+/**
+ * Everything Fixera exposes, as one Express router. FixBridge mounts it inside its existing
+ * backend: app.use('/api/fixera', createFixeraRouter(fixera)). Media URLs in responses assume
+ * that mount path.
+ */
+export function createFixeraRouter(fixera) {
+  const r = express.Router();
+  r.use(express.json({ limit: '1mb' }));
+  const auth = authenticate(fixera.platform);
+  r.use('/admin', auth, requireRole('admin'), createAdminRouter(fixera));
+  r.use('/contractor', auth, requireRole('contractor'), createContractorRouter(fixera));
+  r.use('/', auth, requireRole('homeowner', 'admin', 'contractor'), createPassportRouter(fixera), createCasesRouter(fixera));
+  r.use((req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Route not found' } }));
+  r.use(errorHandler);
+  return r;
+}
+
+/** Standalone server (local development, or running Fixera as its own Railway service). */
 export function createApp(fixera) {
-  const { db, config, platform } = fixera;
+  const { db, config } = fixera;
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
@@ -58,10 +76,7 @@ export function createApp(fixera) {
     }
   });
 
-  const auth = authenticate(platform);
-  app.use('/api/fixera/admin', auth, requireRole('admin'), createAdminRouter(fixera));
-  app.use('/api/fixera/contractor', auth, requireRole('contractor'), createContractorRouter(fixera));
-  app.use('/api/fixera', auth, requireRole('homeowner', 'admin', 'contractor'), createPassportRouter(fixera), createCasesRouter(fixera));
+  app.use('/api/fixera', createFixeraRouter(fixera));
 
   app.use((req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Route not found' } }));
   app.use(errorHandler);
