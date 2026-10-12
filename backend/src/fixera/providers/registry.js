@@ -5,6 +5,21 @@ import { createOpenAICompatibleProvider } from './openaiCompatible.js';
 
 const textOnly = new Set((process.env.FIXERA_TEXT_ONLY_MODELS || '').split(',').map((s) => s.trim()).filter(Boolean));
 
+/** Human-readable problems with provider settings, shown at startup and by `npm run check`. */
+export function providerConfigWarnings(cfg) {
+  const p = cfg.providers;
+  const w = [];
+  const pairs = [['openrouter', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL'], ['openai', 'OPENAI_API_KEY', 'OPENAI_MODEL'], ['gemini', 'GEMINI_API_KEY', 'GEMINI_MODEL']];
+  for (const [name, keyVar, modelVar] of pairs) {
+    if (p[name].apiKey && !p[name].model) w.push(`${keyVar} is set but ${modelVar} is empty, so ${name} is disabled. Set ${modelVar} to a vision-capable model.`);
+    if (!p[name].apiKey && p[name].model) w.push(`${modelVar} is set but ${keyVar} is empty, so ${name} is disabled.`);
+  }
+  if (!p.openrouter.apiKey && !p.anthropic.apiKey && !p.openai.apiKey && !p.gemini.apiKey) {
+    w.push('No AI provider key is set. Add one of OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY.');
+  }
+  return w;
+}
+
 export function createProvidersFromConfig(cfg) {
   const p = cfg.providers;
   const providers = [];

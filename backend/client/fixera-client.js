@@ -39,8 +39,9 @@ export function createFixeraClient({ baseUrl = '/api/fixera', getToken, credenti
     addEquipment: (propertyId, equipment) => call(`/properties/${propertyId}/equipment`, { method: 'POST', body: equipment }),
 
     // Service request / case
-    createCase: ({ propertyId, category, description, equipmentId }) =>
-      call('/cases', { method: 'POST', body: { property_id: propertyId, category, description, equipment_id: equipmentId } }),
+    /** Pass propertyRef (your site's property id, synced with fixera.sync.upsertProperty) or Fixera's propertyId. */
+    createCase: ({ propertyId, propertyRef, category, description, equipmentId }) =>
+      call('/cases', { method: 'POST', body: { property_id: propertyId, property_ref: propertyRef, category, description, equipment_id: equipmentId } }),
     /** files: File[] from your Take Photo (captureSource 'camera') or Upload Photo ('upload') input. */
     uploadPhotos: (caseId, files, captureSource = 'upload') => {
       const form = new FormData();

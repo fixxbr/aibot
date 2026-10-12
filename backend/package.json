@@ -9,7 +9,8 @@
     "migrate": "node --env-file-if-exists=.env src/db/migrate.js",
     "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
     "eval": "node --env-file-if-exists=.env src/evaluations/run.js",
-    "seed:demo": "node --env-file-if-exists=.env scripts/seedDemo.js"
+    "seed:demo": "node --env-file-if-exists=.env scripts/seedDemo.js",
+    "check": "node --env-file-if-exists=.env src/tools/check.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

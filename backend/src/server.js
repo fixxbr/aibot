@@ -4,6 +4,7 @@ import { migrate } from './db/migrate.js';
 import { createStorage } from './fixera/media/storage.js';
 import { createApp, createFixera } from './app.js';
 import { logger } from './logger.js';
+import { providerConfigWarnings } from './fixera/providers/registry.js';
 
 const config = loadConfig();
 const db = await createDb(config);
@@ -21,7 +22,7 @@ const recovered = await fixera.orchestrator.recoverInterrupted();
 if (recovered) logger.warn({ recovered }, 'marked interrupted analyses as recoverable failures');
 
 const providers = Object.keys(fixera.router.health());
-if (!providers.length) logger.warn('No AI provider configured: analysis requests will fail with a recoverable error. Set OPENROUTER_API_KEY or ANTHROPIC_API_KEY.');
+for (const warning of providerConfigWarnings(config)) logger.warn(warning);
 
 const server = createApp(fixera).listen(config.port, () => logger.info({ port: config.port, providers, db: db.kind }, 'Fixera Core listening'));
 

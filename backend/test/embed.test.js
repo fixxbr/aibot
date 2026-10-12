@@ -10,12 +10,12 @@ import { createStorage } from '../src/fixera/media/storage.js';
 import { createFixera, createFixeraRouter } from '../src/app.js';
 import { createPlatformAdapter } from '../src/platform/index.js';
 import { createFixeraClient } from '../client/fixera-client.js';
-import { modelOutput, png, scriptedProvider, seed } from './helpers.js';
+import { freshTestDatabase, modelOutput, png, scriptedProvider, seed } from './helpers.js';
 
 let server, client, ids;
 before(async () => {
   const config = loadConfig({ NODE_ENV: 'test', FIXERA_JWT_SECRET: 'unused', MEDIA_DRIVER: 'memory' });
-  const db = await createDb(config);
+  const db = await createDb(process.env.TEST_DATABASE_URL ? { ...config, databaseUrl: await freshTestDatabase() } : config);
   await migrate(db);
   ids = await seed(db);
   // Host app: its own session middleware sets req.user (here from a cookie-like header).
@@ -48,4 +48,38 @@ test('host session auth + headless client: full AI flow', async () => {
 test('requests without the host session are rejected', async () => {
   const anon = createFixeraClient({ baseUrl: `http://127.0.0.1:${server.address().port}/api/fixera` });
   await assert.rejects(anon.properties(), { status: 401 });
+});
+
+test('sync: site users, properties and subscriptions map onto Fixera records', async () => {
+  const { createSync } = await import('../src/platform/sync.js');
+  const { createDb: mk } = await import('../src/db/index.js');
+  const { migrate: mg } = await import('../src/db/migrate.js');
+  const config = loadConfig({ NODE_ENV: 'test', FIXERA_JWT_SECRET: 'unused', MEDIA_DRIVER: 'memory' });
+  const db = await mk(process.env.TEST_DATABASE_URL ? { ...config, databaseUrl: await freshTestDatabase() } : config);
+  await mg(db);
+  const sync = createSync({ db });
+  const a = await sync.upsertProperty({ externalRef: 42, ownerUserId: 1001, zip: '33101', nickname: 'Home' });
+  const b = await sync.upsertProperty({ externalRef: 42, ownerUserId: 1001, zip: '33102', nickname: 'Home (edited)' });
+  assert.equal(a.id, b.id, 'same site property maps to the same Fixera property');
+  assert.equal(await sync.propertyIdFor(42), a.id);
+  // the site can open a case with its own property id; other users still cannot
+  const { createApp, createFixera } = await import('../src/app.js');
+  const { createStorage: cs } = await import('../src/fixera/media/storage.js');
+  const { default: request } = await import('supertest');
+  const jwt = (await import('jsonwebtoken')).default;
+  const app = createApp(createFixera({ db, config, storage: await cs(config), providers: [], embedder: null }));
+  const tok = (sub) => `Bearer ${jwt.sign({ sub }, 'unused')}`;
+  const ok = await request(app).post('/api/fixera/cases').set('authorization', tok('1001')).send({ property_ref: 42, category: 'plumbing', description: 'Leaking faucet' });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.body.case.property_id, a.id);
+  await sync.upsertUser({ id: 2002 });
+  const denied = await request(app).post('/api/fixera/cases').set('authorization', tok('2002')).send({ property_ref: 42, category: 'plumbing', description: 'Leaking faucet' });
+  assert.equal(denied.status, 404);
+  const platform = createPlatformAdapter({ db, config });
+  assert.equal((await platform.getAnalysisEntitlement('1001')).eligible, false);
+  await sync.setSubscription({ userId: 1001, status: 'active' });
+  assert.equal((await platform.getAnalysisEntitlement('1001')).eligible, true);
+  await sync.setSubscription({ userId: 1001, status: 'canceled' });
+  assert.equal((await platform.getAnalysisEntitlement('1001')).eligible, false);
+  await db.close();
 });

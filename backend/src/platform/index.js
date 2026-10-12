@@ -13,7 +13,16 @@ export function createPlatformAdapter({ db, config, authenticate }) {
     // Pass `authenticate` to reuse FixBridge's existing login/session, e.g.
     //   authenticate: async (req) => req.user && { id: req.user.id, role: req.user.role }
     async authenticate(req) {
-      if (authenticate) return authenticate(req);
+      if (authenticate) {
+        const user = await authenticate(req);
+        if (!user?.id) return null;
+        const role = ['homeowner', 'contractor', 'admin'].includes(user.role) ? user.role : 'homeowner';
+        await db.query(
+          `INSERT INTO users (id, role) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role WHERE users.role IS DISTINCT FROM EXCLUDED.role`,
+          [String(user.id), role],
+        );
+        return { id: String(user.id), role };
+      }
       const header = req.headers.authorization || '';
       const token = header.startsWith('Bearer ') ? header.slice(7) : null;
       if (!token || !config.auth.jwtSecret) return null;

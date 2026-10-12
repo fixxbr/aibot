@@ -11,7 +11,9 @@ import { addHistory } from '../memory/passport.js';
 import { ACCEPTED_TYPES, imageDimensions, qualityFlags, sniffImageType } from '../media/imageInspect.js';
 
 const CreateCase = z.object({
-  property_id: z.string(),
+  // Either Fixera's property id, or the site's own property id synced via fixera.sync.upsertProperty.
+  property_id: z.string().optional(),
+  property_ref: z.union([z.string(), z.number()]).optional(),
   category: z.string().min(1),
   description: z.string().trim().min(5).max(4000),
   equipment_id: z.string().nullable().optional(),
@@ -106,7 +108,13 @@ export function createCasesRouter({ db, platform, storage, orchestrator, handoff
 
   r.post('/cases', asyncHandler(async (req, res) => {
     const body = parseBody(CreateCase, req.body);
-    const property = await assertPropertyAccess(db, req.user, body.property_id, 'manage');
+    let propertyId = body.property_id;
+    if (!propertyId && body.property_ref != null) {
+      const { rows: ref } = await db.query('SELECT id FROM properties WHERE external_ref = $1', [String(body.property_ref)]);
+      propertyId = ref[0]?.id;
+    }
+    if (!propertyId) throw notFound('Property not found');
+    const property = await assertPropertyAccess(db, req.user, propertyId, 'manage');
     if (!(await platform.getServiceCategory(body.category))) throw badRequest('Unknown service category');
     if (body.equipment_id) {
       const { rows } = await db.query('SELECT 1 FROM property_equipment WHERE id = $1 AND property_id = $2', [isUuid(body.equipment_id) ? body.equipment_id : null, property.id]);

@@ -12,12 +12,26 @@ export const SECRET = 'test-secret';
 
 export async function createTestEnv({ providers = [], env = {}, db: existingDb, storage: existingStorage } = {}) {
   const config = loadConfig({ NODE_ENV: 'test', FIXERA_JWT_SECRET: SECRET, MEDIA_DRIVER: 'memory', ...env });
-  const db = existingDb || (await createDb(config));
+  const db = existingDb || (await createDb(process.env.TEST_DATABASE_URL ? { ...config, databaseUrl: await freshTestDatabase() } : config));
   if (!existingDb) await migrate(db);
   const storage = existingStorage || (await createStorage(config));
   const fixera = createFixera({ db, config, storage, providers, embedder: null });
   const app = createApp(fixera);
   return { db, config, storage, fixera, app, api: request(app) };
+}
+
+// With TEST_DATABASE_URL (a real PostgreSQL / Neon branch), each test file gets its own
+// throwaway database so the node-postgres code path is exercised exactly as in production.
+export async function freshTestDatabase() {
+  const { default: pg } = await import('pg');
+  const admin = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+  await admin.connect();
+  const name = `fixera_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await admin.query(`CREATE DATABASE ${name}`);
+  await admin.end();
+  const url = new URL(process.env.TEST_DATABASE_URL);
+  url.pathname = `/${name}`;
+  return url.toString();
 }
 
 export const tokenFor = (userId) => `Bearer ${jwt.sign({ sub: userId }, SECRET, { algorithm: 'HS256', expiresIn: '1h' })}`;

@@ -13,8 +13,9 @@ import { migrate } from './db/migrate.js';
 import { createStorage } from './fixera/media/storage.js';
 import { createPlatformAdapter } from './platform/index.js';
 import { createApp, createFixera, createFixeraRouter } from './app.js';
+import { createSync } from './platform/sync.js';
 
-export { loadConfig, createDb, migrate, createStorage, createPlatformAdapter, createFixera, createFixeraRouter, createApp };
+export { loadConfig, createDb, migrate, createStorage, createPlatformAdapter, createFixera, createFixeraRouter, createApp, createSync };
 
 /**
  * One-call setup for a host Express app. Pass `db` to share FixBridge's own database wrapper
@@ -29,5 +30,5 @@ export async function initFixera({ env = process.env, db, authenticate, platform
   const adapter = { ...createPlatformAdapter({ db, config, authenticate }), ...platform };
   const fixera = createFixera({ db, config, storage, platform: adapter });
   await fixera.orchestrator.recoverInterrupted();
-  return { ...fixera, router: createFixeraRouter(fixera) };
+  return { ...fixera, router: createFixeraRouter(fixera), sync: createSync({ db }) };
 }

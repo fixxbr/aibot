@@ -20,7 +20,7 @@ export function createPassportRouter({ db }) {
 
   r.get('/properties', asyncHandler(async (req, res) => {
     const { rows } = await db.query(
-      `SELECT p.id, p.nickname, p.address_line1, p.city, p.state, p.zip, p.property_type, p.year_built,
+      `SELECT p.id, p.external_ref, p.nickname, p.address_line1, p.city, p.state, p.zip, p.property_type, p.year_built,
               CASE WHEN p.owner_user_id = $1 THEN 'owner' ELSE pa.access_level END AS access
          FROM properties p LEFT JOIN property_access pa ON pa.property_id = p.id AND pa.user_id = $1
         WHERE p.owner_user_id = $1 OR pa.user_id IS NOT NULL ORDER BY p.created_at`,

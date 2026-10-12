@@ -16,6 +16,41 @@ This repository is **Fixera Core** (`backend/`), the AI engine only. It has **no
 
 FixBridge stays in charge of login, HomeCare Pro billing, pricing settings, dispatch and Stripe. Fixera reaches them through one **platform adapter** (`backend/src/platform/index.js`), so none of that logic is duplicated. See [Integrating with fixbridge.us](#integrating-with-fixbridgeus).
 
+## Setup: Neon + one AI key
+
+**1. Neon database**
+- In the Neon console, open your project and create a database named `fixera` (Databases → New database).
+  - A separate database keeps Fixera's tables from colliding with your website's tables.
+  - If the tables do clash, migration stops with a clear message before changing anything.
+- Copy its connection string (Connection Details → pooled connection) into `backend/.env`:
+  ```
+  DATABASE_URL=postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/fixera?sslmode=require&channel_binding=require
+  ```
+- Tables are created automatically on first start. pgvector is enabled automatically, since Neon supports it.
+
+**2. One AI provider.** Any one of these is enough. Add more and Fixera falls back between them in `FIXERA_PROVIDER_ORDER`.
+
+| Provider | Put in `backend/.env` | Notes |
+| --- | --- | --- |
+| Claude (Anthropic) | `ANTHROPIC_API_KEY=...` | Only the key is needed; defaults to `claude-opus-5-5`. Easiest option. |
+| OpenRouter | `OPENROUTER_API_KEY=...` and `OPENROUTER_MODEL=...` | Use a model slug from openrouter.ai/models that accepts images. |
+| OpenAI | `OPENAI_API_KEY=...` and `OPENAI_MODEL=...` | Use a vision-capable model from your OpenAI dashboard. |
+| Gemini | `GEMINI_API_KEY=...` and `GEMINI_MODEL=...` | Use a Gemini model ID from Google AI Studio. |
+
+**3. Verify both**
+```bash
+cd backend && npm install && npm run check
+```
+`npm run check`:
+- connects to Neon and creates the tables
+- sends one small real request per configured provider, with a test image, to prove the key works, the model name is right, the model can see photos and it returns Fixera's format
+- tells you exactly what to fix if any of that fails
+
+**4. Production settings** (Railway environment variables, never in the website code):
+- `NODE_ENV=production`
+- `FIXERA_JWT_SECRET` (or pass `authenticate` when mounting; see below)
+- `MEDIA_DRIVER=s3` with your bucket settings
+
 ## Quick start (local development)
 
 ```bash
@@ -25,7 +60,7 @@ cp .env.example .env              # add OPENROUTER_API_KEY / ANTHROPIC_API_KEY e
 FIXERA_SEED_DEMO=true npm run dev # API on :4000 with an embedded DB; prints dev tokens for testing with curl
 ```
 
-Run the tests with `cd backend && npm test`. There are 47 tests: safety rules, authorization and isolation, image handling, provider failover, case continuity, DIY steps, handoff, the learning loop, and Fixera mounted inside a host app with its own login. They use an embedded database and scripted model providers, so they need no network or keys.
+Run the tests with `cd backend && npm test`. Add `TEST_DATABASE_URL=postgres://...` to run them against a real PostgreSQL or Neon branch; each test file creates its own throwaway database. There are 48 tests: safety rules, authorization and isolation, image handling, provider failover, case continuity, DIY steps, handoff, the learning loop, and Fixera mounted inside a host app with its own login. They use an embedded database and scripted model providers, so they need no network or keys.
 
 Run the evaluation scenarios against real providers with `npm run eval -- --yes`. These calls cost money. Put your own test photos in `backend/src/evaluations/fixtures/` to evaluate vision.
 
@@ -136,7 +171,14 @@ const fixera = await initFixera({
 app.use('/api/fixera', fixera.router);
 ```
 
-- **Users and IDs.** Fixera's tables reference `users(id)` and `properties(id)`. Before running `001_core.sql` on Neon, remove its `CREATE TABLE` blocks for the entities FixBridge already has (`users`, `properties`, `subscriptions`, `service_categories`, `service_requests`) and make sure the column names match, or adjust the queries in `platform/` and `memory/passport.js` to your schema. pgvector is enabled automatically when the extension is available.
+- **Users, properties and subscriptions.** With Fixera on its own Neon database, keep it in step from the existing backend. Signed-in users are also registered automatically on their first request.
+  ```js
+  await fixera.sync.upsertUser({ id: user.id, role: 'homeowner', email: user.email });           // on sign-up
+  await fixera.sync.upsertProperty({ externalRef: property.id, ownerUserId: user.id, zip: property.zip,
+                                     nickname: property.name, city: property.city, state: property.state }); // on add/edit
+  await fixera.sync.setSubscription({ userId: user.id, status: 'active' });                     // from the Stripe webhook
+  ```
+  Your pages can then open cases with your own property ID: `fixera.createCase({ propertyRef: property.id, ... })`.
 - **Storage.** In production, set `MEDIA_DRIVER=s3` (S3/R2) and `npm i @aws-sdk/client-s3`. The server refuses to start with local storage in production.
 - **Keys.** Set `OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY` and the other AI keys only in Railway environment variables. They never reach the browser.
 - **CORS.** If the site on Netlify calls the Railway API on another domain, set `CORS_ORIGINS=https://fixbridge.us` in the backend's CORS configuration.
@@ -151,7 +193,7 @@ import { createFixeraClient } from 'fixera-core/client';   // or copy backend/cl
 const fixera = createFixeraClient({ baseUrl: 'https://<your-railway-api>/api/fixera', getToken: () => session.token });
 
 // Step 1: your existing form
-const { case: c } = await fixera.createCase({ propertyId, category, description });
+const { case: c } = await fixera.createCase({ propertyRef: property.id, category, description }); // your site's property id
 await fixera.uploadPhotos(c.id, cameraFiles, 'camera');   // your "Take Photo" input
 await fixera.uploadPhotos(c.id, uploadedFiles, 'upload'); // your "Upload Photo" input
 

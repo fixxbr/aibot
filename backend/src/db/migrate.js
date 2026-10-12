@@ -18,12 +18,48 @@ export async function migrate(db, log = () => {}) {
       log(`migration ${file} skipped: extension ${ext} unavailable`);
       continue;
     }
+    if (file === '001_core.sql') await assertCompatibleSchema(db);
     await runScript(db, sql);
     await db.query('INSERT INTO fixera_migrations (name) VALUES ($1)', [file]);
     result.applied.push(file);
     log(`migration ${file} applied`);
   }
   return result;
+}
+
+// 001_core.sql creates standalone versions of users/properties/... only if they are missing.
+// If an existing FixBridge database already has differently-shaped tables, stop with a clear
+// message instead of failing halfway through.
+const EXPECTED = {
+  users: { id: 'text', role: 'text' },
+  properties: { id: 'uuid', owner_user_id: 'text', zip: 'text' },
+  service_categories: { slug: 'text' },
+  subscriptions: { user_id: 'text', plan: 'text', status: 'text' },
+  service_requests: { id: 'uuid', property_id: 'uuid', customer_id: 'text' },
+};
+async function assertCompatibleSchema(db) {
+  const { rows } = await db.query(
+    `SELECT table_name, column_name, data_type FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = ANY($1::text[])`,
+    [Object.keys(EXPECTED)],
+  );
+  const problems = [];
+  for (const [table, cols] of Object.entries(EXPECTED)) {
+    const have = rows.filter((r) => r.table_name === table);
+    if (!have.length) continue; // will be created
+    for (const [col, type] of Object.entries(cols)) {
+      const c = have.find((r) => r.column_name === col);
+      if (!c) problems.push(`${table}.${col} is missing`);
+      else if (c.data_type !== type) problems.push(`${table}.${col} is ${c.data_type}, Fixera expects ${type}`);
+    }
+  }
+  if (problems.length) {
+    throw new Error(
+      `This database already has tables that Fixera's standalone schema does not match (${problems.join('; ')}). ` +
+        'Use a separate Neon database for Fixera (e.g. create a database named "fixera" in the same Neon project), ' +
+        'or adapt 001_core.sql and src/platform to your existing tables.',
+    );
+  }
 }
 
 async function extensionAvailable(db, name) {
