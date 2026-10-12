@@ -1,22 +1,26 @@
 # Fixera AI
 
-Fixera is FixBridge's home diagnostics engine. A homeowner describes a problem and adds photos. Fixera then:
+## Integration path for fixbridge.us (start here)
 
-- combines that with the property's history (Property Passport) and reviewed repair knowledge
-- returns a grounded assessment and, when it is safe, guides the homeowner through DIY steps one at a time
-- hands the whole case to a FixBridge professional when needed
-- learns from verified outcomes
+FixBridge already has a working Fixera pipeline (`api/fixa/core.js` → `api/ai.js` → provider adapters). The smallest safe replacement is a **new provider behind `api/ai.js`**, so FixBridge keeps authorization, context selection, parsing, deterministic safety, pricing and persistence.
 
-This repository is **Fixera Core** (`backend/`), the AI engine only. It has **no website and no UI of its own**. It plugs into the existing fixbridge.us site:
+| Path | What it is |
+| --- | --- |
+| `integration/fixbridge/api/fixera-engine-provider.js` | Drop-in adapter for `api/ai.js` (`analyze` / `complete` / `createCompletion` / `extractDocument` / `isConfigured` / `health`). Zero dependencies. |
+| `integration/fixbridge/README.md` | Exact resolver change, environment variables, Railway deploy, error-code mapping, cutover and rollback. |
+| `backend/src/engine/` | **Fixera Engine**: a server-to-server inference service (`npm run start:engine`). Adds HMAC auth, a total deadline, real cancellation, vision-aware fallback, JSON validation, idempotency, async/durable jobs, contract versioning, and health that attests the commit and real inference. |
 
-| Piece | Where it goes | What it is |
-| --- | --- | --- |
-| `backend/` (`initFixera`, `fixera.router`) | Mounted inside the existing FixBridge Node/Express backend | Orchestration, safety, providers, case memory, knowledge, pricing and professional handoff, exposed at `/api/fixera` |
-| `backend/client/fixera-client.js` | Imported by the existing fixbridge.us React pages | Headless functions (`createCase`, `uploadPhotos`, `analyze`, `waitForAnalysis`, `stepResult`, `hirePro`, …). Your current screens render the results. |
+Read **[integration/fixbridge/README.md](integration/fixbridge/README.md)** to wire it in.
 
-FixBridge stays in charge of login, HomeCare Pro billing, pricing settings, dispatch and Stripe. Fixera reaches them through one **platform adapter** (`backend/src/platform/index.js`), so none of that logic is duplicated. See [Integrating with fixbridge.us](#integrating-with-fixbridgeus).
+## Optional: full Fixera Core service (reference)
 
-## Setup: Neon + one AI key
+The rest of `backend/` is a complete standalone implementation of the Fixera developer guide:
+- cases, Property Passport, Knowledge Base, safety engine, pricing, guided DIY, contractor handoff and learning loop
+- a headless client for it
+
+It is **not required** for the integration above, because FixBridge already owns those parts. It is kept as a reference and as a source of tested modules (the safety policy, grounding rules, provider adapters) that FixBridge can adopt piece by piece. The sections below describe it.
+
+## Setup for the reference service: Neon + one AI key
 
 **1. Neon database**
 - In the Neon console, open your project and create a database named `fixera` (Databases → New database).

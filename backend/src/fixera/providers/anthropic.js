@@ -2,6 +2,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { ProviderError, parseJsonText } from './errors.js';
+import { mergeRoles } from './gemini.js';
 
 export function createAnthropicProvider(cfg) {
   const client = new Anthropic({ apiKey: cfg.apiKey, baseURL: cfg.baseUrl, maxRetries: 1 });
@@ -38,6 +39,33 @@ export function createAnthropicProvider(cfg) {
         model: message.model,
         usage: { input_tokens: message.usage?.input_tokens ?? null, output_tokens: message.usage?.output_tokens ?? null },
       };
+    },
+
+    // Raw completion. Current Claude models reject sampling parameters, so temperature is not
+    // forwarded; JSON is requested through the caller's prompt and checked by the engine.
+    async complete({ system, messages, json, maxTokens, timeoutMs, signal, model }) {
+      const params = {
+        model: model || cfg.model,
+        max_tokens: maxTokens || 16000,
+        ...(system ? { system: json ? `${system}\n\nRespond with a single valid JSON object and nothing else.` : system } : json ? { system: 'Respond with a single valid JSON object and nothing else.' } : {}),
+        messages: mergeRoles(messages).map(toAnthropicMessage),
+        output_config: { effort: cfg.effort },
+      };
+      if (cfg.serverFallbacks) {
+        params.betas = ['server-side-fallback-2026-07-01'];
+        params.fallbacks = 'default';
+      }
+      let message;
+      try {
+        message = await client.beta.messages.stream(params, { timeout: timeoutMs, signal }).finalMessage();
+      } catch (err) {
+        throw mapError(err);
+      }
+      if (message.stop_reason === 'refusal') throw new ProviderError('refused', 'anthropic declined the request');
+      if (message.stop_reason === 'max_tokens') throw new ProviderError('invalid_output', 'anthropic output truncated');
+      const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+      if (!text) throw new ProviderError('invalid_output', 'anthropic returned no content');
+      return { text, model: message.model, requestId: message.id || null, usage: { input_tokens: message.usage?.input_tokens ?? null, output_tokens: message.usage?.output_tokens ?? null } };
     },
   };
 }

@@ -9,7 +9,8 @@ export function loadConfig(env = process.env) {
     nodeEnv,
     isProduction: nodeEnv === 'production',
     port: int(env.PORT, 4000),
-    databaseUrl: env.DATABASE_URL || null, // null => embedded PGlite (dev/test only)
+    // NEON_DATABASE_URL takes precedence, matching FixBridge. null => embedded PGlite (dev/test only).
+    databaseUrl: env.NEON_DATABASE_URL || env.DATABASE_URL || null,
     pgliteDataDir: env.PGLITE_DATA_DIR || (nodeEnv === 'test' ? null : './data/pglite'),
     seedDemo: bool(env.FIXERA_SEED_DEMO, false),
     corsOrigins: (env.CORS_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
@@ -32,13 +33,19 @@ export function loadConfig(env = process.env) {
       },
     },
     providers: {
-      order: (env.FIXERA_PROVIDER_ORDER || 'openrouter,anthropic,openai,gemini').split(',').map((s) => s.trim()).filter(Boolean),
+      // Same default order as FixBridge's resolver; FIXERA_AI_PROVIDER / AI_PRIMARY_PROVIDER moves one to the front.
+      order: providerOrder(env),
       timeoutMs: int(env.FIXERA_PROVIDER_TIMEOUT_MS, 120_000),
       allowTextOnlyFallback: bool(env.FIXERA_ALLOW_TEXT_ONLY_FALLBACK, false),
-      openrouter: { apiKey: env.OPENROUTER_API_KEY, model: env.OPENROUTER_MODEL, baseUrl: env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1' },
-      anthropic: { apiKey: env.ANTHROPIC_API_KEY, baseUrl: env.ANTHROPIC_BASE_URL || undefined, model: env.ANTHROPIC_MODEL || 'claude-opus-5-5', effort: env.ANTHROPIC_EFFORT || 'high', serverFallbacks: bool(env.ANTHROPIC_SERVER_FALLBACKS, true) },
-      openai: { apiKey: env.OPENAI_API_KEY, model: env.OPENAI_MODEL, baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1' },
-      gemini: { apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL, baseUrl: env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta' },
+      openrouter: { apiKey: env.OPENROUTER_API_KEY, model: env.OPENROUTER_MODEL || (env.OPENROUTER_API_KEY ? 'openrouter/free' : undefined), baseUrl: env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1', timeoutMs: int(env.OPENROUTER_TIMEOUT_MS, undefined) },
+      anthropic: { apiKey: env.ANTHROPIC_API_KEY, baseUrl: env.ANTHROPIC_BASE_URL || undefined, timeoutMs: int(env.ANTHROPIC_TIMEOUT_MS, undefined), model: env.ANTHROPIC_MODEL || 'claude-opus-5-5', effort: env.ANTHROPIC_EFFORT || 'high', serverFallbacks: bool(env.ANTHROPIC_SERVER_FALLBACKS, true) },
+      openai: { apiKey: env.OPENAI_API_KEY, model: env.OPENAI_MODEL || (env.OPENAI_API_KEY ? 'gpt-4.1-mini' : undefined), baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1', timeoutMs: int(env.OPENAI_TIMEOUT_MS, undefined) },
+      gemini: {
+        apiKey: env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_CLOUD_API_KEY,
+        model: env.GEMINI_MODEL || (env.GEMINI_API_KEY || env.GOOGLE_API_KEY || env.GOOGLE_CLOUD_API_KEY ? 'gemini-2.5-flash' : undefined),
+        baseUrl: env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta',
+        timeoutMs: int(env.GEMINI_TIMEOUT_MS, undefined),
+      },
       // USD per million tokens, for cost logging only: {"claude-opus-5-5":{"in":4,"out":20}}
       prices: safeJson(env.FIXERA_MODEL_PRICES, { 'claude-opus-5-5': { in: 4, out: 20 } }),
     },
@@ -46,13 +53,29 @@ export function loadConfig(env = process.env) {
       provider: env.FIXERA_EMBEDDINGS || 'none', // none | openai
       model: env.FIXERA_EMBEDDINGS_MODEL || 'text-embedding-3-small',
     },
+    engine: {
+      // Signing secrets shared only with FixBridge's server (comma-separated for rotation).
+      secrets: (env.FIXERA_ENGINE_SECRETS || env.FIXERA_ENGINE_SECRET || '').split(',').map((s) => s.trim()).filter(Boolean),
+      // The engine's own optional database for durable idempotency/jobs. Deliberately NOT
+      // DATABASE_URL / NEON_DATABASE_URL: the engine never gets FixBridge's database.
+      databaseUrl: env.FIXERA_ENGINE_DATABASE_URL || null,
+      defaultDeadlineMs: int(env.FIXERA_ENGINE_DEFAULT_DEADLINE_MS, 35_000),
+      maxDeadlineMs: int(env.FIXERA_ENGINE_MAX_DEADLINE_MS, 300_000),
+      maxImages: int(env.FIXERA_ENGINE_MAX_IMAGES, 6),
+      maxImageChars: int(env.AI_MAX_IMAGE_CHARS || env.FIXERA_ENGINE_MAX_IMAGE_CHARS, 700_000),
+      bodyLimit: env.FIXERA_ENGINE_BODY_LIMIT || env.JSON_BODY_LIMIT || '20mb',
+      rateLimitPerMinute: int(env.FIXERA_ENGINE_RATE_LIMIT_PER_MINUTE, 120),
+      idempotencyTtlS: int(env.FIXERA_ENGINE_IDEMPOTENCY_TTL_S, 24 * 3600),
+      commit: env.FIXERA_ENGINE_COMMIT || env.RAILWAY_GIT_COMMIT_SHA || env.COMMIT_REF || env.SOURCE_COMMIT || null,
+    },
     analysis: {
       maxHistoryMessages: int(env.FIXERA_MAX_HISTORY_MESSAGES, 40),
       maxKnowledgeChunks: int(env.FIXERA_MAX_KNOWLEDGE_CHUNKS, 6),
       rateLimitPerHour: int(env.FIXERA_ANALYSIS_RATE_LIMIT_PER_HOUR, 30),
     },
   };
-  if (config.isProduction) {
+  if (nodeEnv === 'engine') config.isProduction = true;
+  if (config.isProduction && nodeEnv !== 'engine') {
     if (!config.auth.jwtSecret) throw new Error('FIXERA_JWT_SECRET is required in production');
     if (!config.databaseUrl) throw new Error('DATABASE_URL is required in production');
     if (config.media.driver === 'local') throw new Error('MEDIA_DRIVER=s3 (private object storage) is required in production');
@@ -63,4 +86,12 @@ export function loadConfig(env = process.env) {
 function safeJson(v, d) {
   if (!v) return d;
   try { return JSON.parse(v); } catch { return d; }
+}
+
+const KNOWN_PROVIDERS = ['gemini', 'openrouter', 'anthropic', 'openai'];
+function providerOrder(env) {
+  let order = (env.FIXERA_PROVIDER_ORDER || KNOWN_PROVIDERS.join(',')).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const preferred = String(env.FIXERA_AI_PROVIDER || env.AI_PRIMARY_PROVIDER || '').trim().toLowerCase();
+  if (KNOWN_PROVIDERS.includes(preferred)) order = [preferred, ...order.filter((p) => p !== preferred)];
+  return order;
 }

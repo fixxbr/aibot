@@ -42,6 +42,7 @@ export function createProvidersFromConfig(cfg) {
   if (p.gemini.apiKey && p.gemini.model) {
     providers.push(createGeminiProvider({ apiKey: p.gemini.apiKey, model: p.gemini.model, baseUrl: p.gemini.baseUrl, vision: !textOnly.has(p.gemini.model) }));
   }
+  for (const prov of providers) prov.timeoutMs = p[prov.name]?.timeoutMs;
   const order = p.order;
   return providers.sort((a, b) => rank(order, a.name) - rank(order, b.name));
 }

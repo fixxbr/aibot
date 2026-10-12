@@ -97,3 +97,47 @@ test('Anthropic: base64 image block, structured output format and refusal fallba
   assert.ok(ModelAssessment.safeParse(out.output).success);
   assert.equal(out.usage.input_tokens, 12);
 });
+
+test('raw complete(): OpenAI/OpenRouter JSON mode and sampling pass-through', async () => {
+  reply = () => [200, { id: 'chatcmpl-1', model: 'm', choices: [{ finish_reason: 'stop', message: { content: '{"summary":"x"}' } }], usage: { prompt_tokens: 3, completion_tokens: 2 } }];
+  const p = createOpenAICompatibleProvider({ name: 'openrouter', apiKey: 'k', model: 'vendor/model', baseUrl: base });
+  const out = await p.complete({ system: 'sys', messages: request.messages, json: true, temperature: 0.2, maxTokens: 900, timeoutMs: 5000 });
+  assert.deepEqual(last.body.response_format, { type: 'json_object' });
+  assert.equal(last.body.temperature, 0.2);
+  assert.equal(last.body.max_tokens, 900);
+  assert.equal(last.body.messages[0].content, 'sys');
+  assert.equal(last.body.messages[1].content[1].image_url.url, `data:image/jpeg;base64,${IMG}`);
+  assert.equal(out.text, '{"summary":"x"}');
+  assert.equal(out.requestId, 'chatcmpl-1');
+});
+
+test('raw complete(): Gemini merges consecutive turns and requests JSON', async () => {
+  reply = () => [200, { responseId: 'g1', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"a":1}' }] } }] }];
+  const p = createGeminiProvider({ apiKey: 'g', model: 'gemini-test', baseUrl: base });
+  const out = await p.complete({ messages: [{ role: 'user', content: [{ type: 'text', text: 'a' }] }, { role: 'user', content: [{ type: 'text', text: 'b' }] }], json: true, maxTokens: 500, timeoutMs: 5000 });
+  assert.equal(last.body.contents.length, 1);
+  assert.equal(last.body.contents[0].parts.length, 2);
+  assert.equal(last.body.generationConfig.responseMimeType, 'application/json');
+  assert.equal(last.body.generationConfig.maxOutputTokens, 500);
+  assert.equal(out.text, '{"a":1}');
+});
+
+test('raw complete(): Claude omits sampling parameters and asks for JSON in the system prompt', async () => {
+  const sse = (events) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join('');
+  reply = () => [200, sse([
+    ['message_start', { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, usage: { input_tokens: 4, output_tokens: 0 } } }],
+    ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+    ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '{"ok":true}' } }],
+    ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+    ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 3 } }],
+    ['message_stop', { type: 'message_stop' }],
+  ]), 'text/event-stream'];
+  const p = createAnthropicProvider({ apiKey: 'a', baseUrl: base, model: 'claude-opus-5-5', effort: 'high', serverFallbacks: true });
+  const out = await p.complete({ system: 'sys', messages: request.messages, json: true, temperature: 0.7, maxTokens: 800, timeoutMs: 5000 });
+  assert.equal(last.body.temperature, undefined);
+  assert.equal(last.body.max_tokens, 800);
+  assert.match(last.body.system, /^sys\n\nRespond with a single valid JSON object/);
+  assert.equal(last.body.messages[0].content[1].source.data, IMG);
+  assert.equal(out.text, '{"ok":true}');
+  assert.equal(out.requestId, 'msg_1');
+});
